@@ -18,4 +18,5 @@ func main() {
 			log.Printf("%d OPEN\n", p)
 		}(i)
 	}
+	log.Println("DONE")
 }
