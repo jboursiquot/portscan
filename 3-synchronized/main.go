@@ -37,7 +37,7 @@ func main() {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(tp - fp)
+	wg.Add(tp - fp + 1)
 	for i := fp; i <= tp; i++ {
 		go func(p int) {
 			defer wg.Done()
