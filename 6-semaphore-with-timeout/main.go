@@ -65,7 +65,7 @@ func main() {
 
 	sort.Ints(openPorts)
 	for _, p := range openPorts {
-		fmt.Printf("%d - open\n", p)
+		fmt.Printf("%d - OPEN\n", p)
 	}
 }
 
