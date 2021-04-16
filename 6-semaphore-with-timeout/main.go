@@ -27,6 +27,8 @@ func init() {
 	flag.StringVar(&ports, "ports", "80", "Port(s) (e.g. 80, 22-100).")
 	flag.IntVar(&numWorkers, "workers", runtime.NumCPU(), "Number of workers. Defaults to system's number of CPUs.")
 	flag.IntVar(&timeout, "timeout", 5, "Timeout in seconds (default is 5).")
+
+	rand.Seed(time.Now().UnixNano())
 }
 
 func main() {
@@ -113,7 +115,6 @@ func scan(host string, port int) int {
 }
 
 func sleepy(max int) {
-	rand.Seed(time.Now().UnixNano())
 	n := rand.Intn(max)
 	time.Sleep(time.Duration(n) * time.Second)
 }
