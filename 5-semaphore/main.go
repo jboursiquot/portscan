@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,12 +18,10 @@ import (
 
 var host string
 var ports string
-var numWorkers int
 
 func init() {
 	flag.StringVar(&host, "host", "127.0.0.1", "Host to scan.")
 	flag.StringVar(&ports, "ports", "80", "Port(s) (e.g. 80, 22-100).")
-	flag.IntVar(&numWorkers, "workers", runtime.NumCPU(), "Number of workers. Defaults to system's number of CPUs.")
 }
 
 func main() {
@@ -46,17 +43,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	sem := semaphore.NewWeighted(int64(numWorkers))
+	var semMaxWeight int64 = 100_000
+	var semAcquisitionWeight int64 = 100
+
+	sem := semaphore.NewWeighted(semMaxWeight)
 	ctx := context.Background()
 
 	for _, port := range portsToScan {
-		if err := sem.Acquire(ctx, 1); err != nil {
+		if err := sem.Acquire(ctx, semAcquisitionWeight); err != nil {
 			fmt.Printf("Failed to acquire semaphore (port %d): %v\n", port, err)
 			break
 		}
 
 		go func(port int) {
-			defer sem.Release(1)
+			defer sem.Release(semAcquisitionWeight)
 			p := scan(host, port)
 			if p != 0 {
 				openPorts = append(openPorts, p)
@@ -65,7 +65,7 @@ func main() {
 	}
 
 	// We block here until done.
-	if err := sem.Acquire(ctx, int64(numWorkers)); err != nil {
+	if err := sem.Acquire(ctx, int64(semMaxWeight)); err != nil {
 		fmt.Printf("Failed to acquire semaphore: %v\n", err)
 	}
 
