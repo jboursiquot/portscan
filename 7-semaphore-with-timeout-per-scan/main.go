@@ -60,7 +60,7 @@ func main() {
 		defer cancel()
 
 		if err := sem.Acquire(ctx, 1); err != nil {
-			fmt.Printf("Failed to acquire semaphore: %v\n", err)
+			fmt.Printf("Failed to acquire semaphore (port %d): %v\n", port, err)
 			continue
 		}
 
