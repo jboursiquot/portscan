@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -49,8 +50,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	var semMaxWeight int64 = 100_000
-	var semAcquisitionWeight int64 = 100
+	var semMaxWeight int64 = int64(runtime.NumCPU())
+	var semAcquisitionWeight int64 = 1
 
 	sem := semaphore.NewWeighted(semMaxWeight)
 	ctx := context.Background()
