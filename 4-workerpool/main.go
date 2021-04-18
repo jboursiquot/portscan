@@ -21,7 +21,7 @@ var numWorkers int
 func init() {
 	flag.StringVar(&host, "host", "127.0.0.1", "Host to scan.")
 	flag.StringVar(&ports, "ports", "80", "Port(s) (e.g. 80, 22-100).")
-	flag.IntVar(&numWorkers, "workers", runtime.NumCPU(), "Number of workers. Defaults to 10.")
+	flag.IntVar(&numWorkers, "workers", runtime.NumCPU(), "Number of workers. Defaults to system's number of CPUs.")
 }
 
 func main() {
