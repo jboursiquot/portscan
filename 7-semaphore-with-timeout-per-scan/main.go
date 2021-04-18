@@ -8,10 +8,12 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"os/signal"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/sync/semaphore"
@@ -34,15 +36,24 @@ func init() {
 func main() {
 	flag.Parse()
 
+	var openPorts []int
+
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigs
+		printResults(openPorts)
+		os.Exit(0)
+	}()
+
 	portsToScan, err := parsePortsToScan(ports)
 	if err != nil {
-		fmt.Printf("Failed to parse ports to scan: %s", err)
+		fmt.Printf("Failed to parse ports to scan: %s\n", err)
 		os.Exit(1)
 	}
 
 	sem := semaphore.NewWeighted(int64(numWorkers))
-	openPorts := make([]int, 0)
-	ctx := context.TODO()
+	ctx := context.Background()
 
 	for _, port := range portsToScan {
 		ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
@@ -63,14 +74,10 @@ func main() {
 		}(port)
 	}
 
-	if err := sem.Acquire(ctx, int64(numWorkers)); err != nil {
-		fmt.Printf("Failed to acquire semaphore: %v", err)
-	}
+	// We block here until done.
+	sem.Acquire(ctx, int64(numWorkers))
 
-	sort.Ints(openPorts)
-	for _, p := range openPorts {
-		fmt.Printf("%d - OPEN\n", p)
-	}
+	printResults(openPorts)
 }
 
 func parsePortsToScan(portsFlag string) ([]int, error) {
@@ -119,4 +126,12 @@ func scan(host string, port int) int {
 func sleepy(max int) {
 	n := rand.Intn(max)
 	time.Sleep(time.Duration(n) * time.Second)
+}
+
+func printResults(ports []int) {
+	sort.Ints(ports)
+	fmt.Println("\nResults\n--------------")
+	for _, p := range ports {
+		fmt.Printf("%d - open\n", p)
+	}
 }

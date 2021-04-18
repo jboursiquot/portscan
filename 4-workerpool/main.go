@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/signal"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 var host string
@@ -25,9 +27,19 @@ func init() {
 func main() {
 	flag.Parse()
 
+	var openPorts []int
+
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigs
+		printResults(openPorts)
+		os.Exit(0)
+	}()
+
 	portsToScan, err := parsePortsToScan(ports)
 	if err != nil {
-		fmt.Printf("Failed to parse ports to scan: %s", err)
+		fmt.Printf("Failed to parse ports to scan: %s\n", err)
 		os.Exit(1)
 	}
 
@@ -44,7 +56,6 @@ func main() {
 		}
 	}()
 
-	var openPorts []int
 	for i := 0; i < len(portsToScan); i++ {
 		if p := <-resultsChan; p != 0 { // non-zero port means it's open
 			openPorts = append(openPorts, p)
@@ -53,11 +64,7 @@ func main() {
 
 	close(portsChan)
 	close(resultsChan)
-
-	sort.Ints(openPorts)
-	for _, p := range openPorts {
-		fmt.Printf("%d - open\n", p)
-	}
+	printResults(openPorts)
 }
 
 func parsePortsToScan(portsFlag string) ([]int, error) {
@@ -103,5 +110,13 @@ func worker(host string, portsChan <-chan int, resultsChan chan<- int) {
 		}
 		conn.Close()
 		resultsChan <- p
+	}
+}
+
+func printResults(ports []int) {
+	sort.Ints(ports)
+	fmt.Println("\nResults\n--------------")
+	for _, p := range ports {
+		fmt.Printf("%d - open\n", p)
 	}
 }
