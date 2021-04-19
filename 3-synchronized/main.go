@@ -37,7 +37,8 @@ func main() {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(tp - fp + 1)
+	numGoRoutinesToWaitOn := tp - fp + 1
+	wg.Add(numGoRoutinesToWaitOn)
 	for i := fp; i <= tp; i++ {
 		go func(p int) {
 			defer wg.Done()
@@ -50,7 +51,6 @@ func main() {
 			log.Printf("%d OPEN\n", p)
 		}(i)
 	}
-	log.Println("WAITING")
 	wg.Wait()
 	log.Println("DONE")
 }
