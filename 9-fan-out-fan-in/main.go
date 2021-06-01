@@ -1,11 +1,9 @@
 package main
 
 import (
-	"encoding/csv"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"strconv"
@@ -14,14 +12,10 @@ import (
 	"time"
 )
 
-var host string
 var ports string
-var batchSize int
 
 func init() {
-	flag.StringVar(&host, "host", "127.0.0.1", "Host to scan.")
 	flag.StringVar(&ports, "ports", "80", "Port(s) (e.g. 80, 22-100).")
-	flag.IntVar(&batchSize, "batchSize", 15, "Batch size of pipeline (default is 10).")
 }
 
 func main() {
@@ -33,29 +27,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	dest, err := os.Create("scans-fan-out-fan-in.csv")
-	if err != nil {
-		fmt.Printf("Failed to create scan results destination: %s\n", err)
-		os.Exit(2)
-	}
+	in := gen(portsToScan...)
 
-	// fan out
-	batches := batch(portsToScan, batchSize)
-	var scanChans []<-chan scanOp
-	for _, b := range batches {
-		scanChans = append(scanChans, doScan(genScanChan(host, b...)))
-	}
+	// fan-out
+	sc1 := scan(in)
+	sc2 := scan(in)
+	sc3 := scan(in)
 
-	scanChan := storeScan(
-		dest,
-		openPortsOnly(
-			fanIn(scanChans...),
-		),
-	)
-	for s := range scanChan {
-		if !s.open && s.scanErr != fmt.Sprintf("dial tcp 127.0.0.1:%d: connect: connection refused", s.port) {
-			fmt.Println(s.scanErr)
-		}
+	for s := range filter(merge(sc1, sc2, sc3)) {
+		fmt.Printf("%#v\n", s)
 	}
 }
 
@@ -92,42 +72,27 @@ func parsePortsToScan(portsFlag string) ([]int, error) {
 }
 
 type scanOp struct {
-	host         string
 	port         int
 	open         bool
 	scanErr      string
 	scanDuration time.Duration
 }
 
-func (so scanOp) csvHeaders() []string {
-	return []string{"host", "port", "open", "scanError", "scanDuration"}
-}
-
-func (so scanOp) asSlice() []string {
-	return []string{
-		so.host,
-		strconv.FormatInt(int64(so.port), 10),
-		strconv.FormatBool(so.open),
-		so.scanErr,
-		so.scanDuration.String(),
-	}
-}
-
-func genScanChan(host string, ports ...int) <-chan scanOp {
-	c := make(chan scanOp, len(ports))
+func gen(ports ...int) <-chan scanOp {
+	out := make(chan scanOp, len(ports))
 	for _, p := range ports {
-		c <- scanOp{host: host, port: p}
+		out <- scanOp{port: p}
 	}
-	close(c)
-	return c
+	close(out)
+	return out
 }
 
-func doScan(scans <-chan scanOp) <-chan scanOp {
-	c := make(chan scanOp)
+func scan(in <-chan scanOp) <-chan scanOp {
+	out := make(chan scanOp)
 	go func() {
-		defer close(c)
-		for scan := range scans {
-			address := fmt.Sprintf("%s:%d", scan.host, scan.port)
+		defer close(out)
+		for scan := range in {
+			address := fmt.Sprintf("127.0.0.1:%d", scan.port)
 			start := time.Now()
 			conn, err := net.Dial("tcp", address)
 			scan.scanDuration = time.Since(start)
@@ -137,82 +102,43 @@ func doScan(scans <-chan scanOp) <-chan scanOp {
 				conn.Close()
 				scan.open = true
 			}
-			c <- scan
+			out <- scan
 		}
 	}()
-	return c
+	return out
 }
 
-func openPortsOnly(scans <-chan scanOp) <-chan scanOp {
-	c := make(chan scanOp)
+func filter(in <-chan scanOp) <-chan scanOp {
+	out := make(chan scanOp)
 	go func() {
-		defer close(c)
-		for scan := range scans {
+		defer close(out)
+		for scan := range in {
 			if scan.open {
-				c <- scan
+				out <- scan
 			}
 		}
 	}()
-	return c
+	return out
 }
 
-func storeScan(file io.Writer, scans <-chan scanOp) <-chan scanOp {
-	w := csv.NewWriter(file)
-	c := make(chan scanOp)
-	go func() {
-		defer w.Flush()
-		defer close(c)
-		var headerWritten bool
-		for scan := range scans {
-			if !headerWritten {
-				headers := scan.csvHeaders()
-				if err := w.Write(headers); err != nil {
-					fmt.Println(err)
-					break
-				}
-				headerWritten = true
-			}
-			values := scan.asSlice()
-			if err := w.Write(values); err != nil {
-				fmt.Println(err)
-				break
-			}
-			c <- scan
-		}
-	}()
-	return c
-}
-
-func fanIn(scanChans ...<-chan scanOp) <-chan scanOp {
-	c := make(chan scanOp)
+func merge(chans ...<-chan scanOp) <-chan scanOp {
+	out := make(chan scanOp)
 	wg := sync.WaitGroup{}
-	wg.Add(len(scanChans))
+	wg.Add(len(chans))
 
-	for _, scanChan := range scanChans {
-		go func(scanChan <-chan scanOp) {
-			for scan := range scanChan {
-				c <- scan
+	for _, sc := range chans {
+		go func(sc <-chan scanOp) {
+			for scan := range sc {
+				out <- scan
 			}
 			wg.Done()
-		}(scanChan)
+		}(sc)
 	}
 
 	go func() {
 		wg.Wait()
-		close(c)
+		close(out)
 	}()
 
-	return c
-}
-
-func batch(ports []int, size int) [][]int {
-	var batches [][]int
-	for i := 0; i < len(ports); i += size {
-		end := i + size
-		if end > len(ports) {
-			end = len(ports)
-		}
-		batches = append(batches, ports[i:end])
-	}
-	return batches
+	return out
 }
