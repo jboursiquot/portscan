@@ -30,21 +30,29 @@ func main() {
 		os.Exit(1)
 	}
 
-	in := gen(portsToScan...)
+	// The done channel will be shared by the entire pipeline
+	// so that when it's closed it serves as a signal
+	// for all the goroutines we started to exit.
+	done := make(chan struct{})
+	defer close(done)
+
+	in := gen(done, portsToScan...)
 
 	// fan-out
 	var chans []<-chan scanOp
 	for i := 0; i < workers; i++ {
-		chans = append(chans, scan(in))
+		chans = append(chans, scan(done, in))
 	}
 
-	for s := range filterOpen(merge(chans...)) {
+	for s := range filterOpen(done, merge(done, chans...)) {
 		fmt.Printf("%#v\n", s)
 	}
 
 	// for s := range filterErr(merge(chans...)) {
 	// 	fmt.Printf("%#v\n", s)
 	// }
+
+	// done chan is closed by the deferred call here
 }
 
 func parsePortsToScan(portsFlag string) ([]int, error) {
@@ -86,73 +94,98 @@ type scanOp struct {
 	scanDuration time.Duration
 }
 
-func gen(ports ...int) <-chan scanOp {
+func gen(done <-chan struct{}, ports ...int) <-chan scanOp {
 	out := make(chan scanOp, len(ports))
-	for _, p := range ports {
-		out <- scanOp{port: p}
-	}
-	close(out)
-	return out
-}
-
-func scan(in <-chan scanOp) <-chan scanOp {
-	out := make(chan scanOp)
 	go func() {
 		defer close(out)
-		for scan := range in {
-			address := fmt.Sprintf("127.0.0.1:%d", scan.port)
-			start := time.Now()
-			conn, err := net.Dial("tcp", address)
-			scan.scanDuration = time.Since(start)
-			if err != nil {
-				scan.scanErr = err.Error()
-			} else {
-				conn.Close()
-				scan.open = true
+		for _, p := range ports {
+			select {
+			case out <- scanOp{port: p}:
+			case <-done:
+				return
 			}
-			out <- scan
 		}
 	}()
 	return out
 }
 
-func filterOpen(in <-chan scanOp) <-chan scanOp {
+func scan(done <-chan struct{}, in <-chan scanOp) <-chan scanOp {
 	out := make(chan scanOp)
 	go func() {
 		defer close(out)
 		for scan := range in {
-			if scan.open {
+			select {
+			default:
+				address := fmt.Sprintf("127.0.0.1:%d", scan.port)
+				start := time.Now()
+				conn, err := net.Dial("tcp", address)
+				scan.scanDuration = time.Since(start)
+				if err != nil {
+					scan.scanErr = err.Error()
+				} else {
+					conn.Close()
+					scan.open = true
+				}
 				out <- scan
+			case <-done:
+				return
 			}
 		}
 	}()
 	return out
 }
 
-func filterErr(in <-chan scanOp) <-chan scanOp {
+func filterOpen(done <-chan struct{}, in <-chan scanOp) <-chan scanOp {
 	out := make(chan scanOp)
 	go func() {
 		defer close(out)
 		for scan := range in {
-			if !scan.open && strings.Contains(scan.scanErr, "too many open files") {
-				out <- scan
+			select {
+			default:
+				if scan.open {
+					out <- scan
+				}
+			case <-done:
+				return
 			}
 		}
 	}()
 	return out
 }
 
-func merge(chans ...<-chan scanOp) <-chan scanOp {
+func filterErr(done <-chan struct{}, in <-chan scanOp) <-chan scanOp {
+	out := make(chan scanOp)
+	go func() {
+		defer close(out)
+		for scan := range in {
+			select {
+			default:
+				if !scan.open && strings.Contains(scan.scanErr, "too many open files") {
+					out <- scan
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+	return out
+}
+
+func merge(done <-chan struct{}, chans ...<-chan scanOp) <-chan scanOp {
 	out := make(chan scanOp)
 	wg := sync.WaitGroup{}
 	wg.Add(len(chans))
 
 	for _, sc := range chans {
 		go func(sc <-chan scanOp) {
+			defer wg.Done()
 			for scan := range sc {
-				out <- scan
+				select {
+				case out <- scan:
+				case <-done:
+					return
+				}
 			}
-			wg.Done()
 		}(sc)
 	}
 
