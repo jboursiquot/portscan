@@ -13,12 +13,12 @@ import (
 	"time"
 )
 
-var host string
 var ports string
+var outFile string
 
 func init() {
-	flag.StringVar(&host, "host", "127.0.0.1", "Host to scan.")
 	flag.StringVar(&ports, "ports", "80", "Port(s) (e.g. 80, 22-100).")
+	flag.StringVar(&outFile, "outfile", "scans.csv", "Destination of scan results (defaults to scans.csv)")
 }
 
 func main() {
@@ -30,20 +30,22 @@ func main() {
 		os.Exit(1)
 	}
 
-	dest, err := os.Create("scans.csv")
+	dest, err := os.Create(outFile)
 	if err != nil {
 		fmt.Printf("Failed to create scan results destination: %s\n", err)
 		os.Exit(2)
 	}
 
-	scanChan := storeScan(
-		dest,
-		openPortsOnly(
-			doScan(
-				genScanChan(host, portsToScan...),
-			),
-		),
-	)
+	// pipeline
+	scanChan := store(dest, filter(scan(gen(portsToScan...))))
+
+	// broken up for explainability
+	// var scanChan <-chan scanOp
+	// scanChan = gen(portsToScan...)
+	// scanChan = scan(scanChan)
+	// scanChan = filter(scanChan)
+	// scanChan = store(dest, scanChan)
+
 	for s := range scanChan {
 		if !s.open && s.scanErr != fmt.Sprintf("dial tcp 127.0.0.1:%d: connect: connection refused", s.port) {
 			fmt.Println(s.scanErr)
@@ -84,7 +86,6 @@ func parsePortsToScan(portsFlag string) ([]int, error) {
 }
 
 type scanOp struct {
-	host         string
 	port         int
 	open         bool
 	scanErr      string
@@ -92,12 +93,11 @@ type scanOp struct {
 }
 
 func (so scanOp) csvHeaders() []string {
-	return []string{"host", "port", "open", "scanError", "scanDuration"}
+	return []string{"port", "open", "scanError", "scanDuration"}
 }
 
 func (so scanOp) asSlice() []string {
 	return []string{
-		so.host,
 		strconv.FormatInt(int64(so.port), 10),
 		strconv.FormatBool(so.open),
 		so.scanErr,
@@ -105,21 +105,23 @@ func (so scanOp) asSlice() []string {
 	}
 }
 
-func genScanChan(host string, ports ...int) <-chan scanOp {
-	c := make(chan scanOp, len(ports))
-	for _, p := range ports {
-		c <- scanOp{host: host, port: p}
-	}
-	close(c)
-	return c
+func gen(ports ...int) <-chan scanOp {
+	out := make(chan scanOp, len(ports))
+	go func() {
+		defer close(out)
+		for _, p := range ports {
+			out <- scanOp{port: p}
+		}
+	}()
+	return out
 }
 
-func doScan(scans <-chan scanOp) <-chan scanOp {
-	c := make(chan scanOp)
+func scan(in <-chan scanOp) <-chan scanOp {
+	out := make(chan scanOp)
 	go func() {
-		defer close(c)
-		for scan := range scans {
-			address := fmt.Sprintf("%s:%d", scan.host, scan.port)
+		defer close(out)
+		for scan := range in {
+			address := fmt.Sprintf("127.0.0.1:%d", scan.port)
 			start := time.Now()
 			conn, err := net.Dial("tcp", address)
 			scan.scanDuration = time.Since(start)
@@ -129,48 +131,47 @@ func doScan(scans <-chan scanOp) <-chan scanOp {
 				conn.Close()
 				scan.open = true
 			}
-			c <- scan
+			out <- scan
 		}
 	}()
-	return c
+	return out
 }
 
-func openPortsOnly(scans <-chan scanOp) <-chan scanOp {
-	c := make(chan scanOp)
+func filter(in <-chan scanOp) <-chan scanOp {
+	out := make(chan scanOp)
 	go func() {
-		defer close(c)
-		for scan := range scans {
+		defer close(out)
+		for scan := range in {
 			if scan.open {
-				c <- scan
+				out <- scan
 			}
 		}
 	}()
-	return c
+	return out
 }
 
-func storeScan(file io.Writer, scans <-chan scanOp) <-chan scanOp {
-	w := csv.NewWriter(file)
-	c := make(chan scanOp)
+func store(file io.Writer, in <-chan scanOp) <-chan scanOp {
+	csvWriter := csv.NewWriter(file)
+	out := make(chan scanOp)
 	go func() {
-		defer w.Flush()
-		defer close(c)
+		defer csvWriter.Flush()
+		defer close(out)
 		var headerWritten bool
-		for scan := range scans {
+		for scan := range in {
 			if !headerWritten {
 				headers := scan.csvHeaders()
-				if err := w.Write(headers); err != nil {
+				if err := csvWriter.Write(headers); err != nil {
 					fmt.Println(err)
 					break
 				}
 				headerWritten = true
 			}
 			values := scan.asSlice()
-			if err := w.Write(values); err != nil {
+			if err := csvWriter.Write(values); err != nil {
 				fmt.Println(err)
 				break
 			}
-			c <- scan
 		}
 	}()
-	return c
+	return out
 }
