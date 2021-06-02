@@ -50,6 +50,8 @@ func main() {
 
 	// for s := range filterErr(done, merge(done, chans...)) {
 	// 	fmt.Printf("%#v\n", s)
+	// 	done <- struct{}{}
+	// 	return
 	// }
 
 	// done chan is closed by the deferred call here
