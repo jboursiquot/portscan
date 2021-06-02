@@ -48,7 +48,7 @@ func main() {
 		fmt.Printf("%#v\n", s)
 	}
 
-	// for s := range filterErr(merge(chans...)) {
+	// for s := range filterErr(done, merge(done, chans...)) {
 	// 	fmt.Printf("%#v\n", s)
 	// }
 
