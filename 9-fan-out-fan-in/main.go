@@ -15,7 +15,7 @@ import (
 var ports string
 
 func init() {
-	flag.StringVar(&ports, "ports", "80", "Port(s) (e.g. 80, 22-100).")
+	flag.StringVar(&ports, "ports", "5400-5500", "Port(s) (e.g. 80, 22-100).")
 }
 
 func main() {
@@ -35,6 +35,7 @@ func main() {
 	sc3 := scan(in)
 
 	for s := range filter(merge(sc1, sc2, sc3)) {
+		// for s := range merge(sc1, sc2, sc3) {
 		fmt.Printf("%#v\n", s)
 	}
 }

@@ -17,7 +17,7 @@ var ports string
 var outFile string
 
 func init() {
-	flag.StringVar(&ports, "ports", "80", "Port(s) (e.g. 80, 22-100).")
+	flag.StringVar(&ports, "ports", "5400-5500", "Port(s) (e.g. 80, 22-100).")
 	flag.StringVar(&outFile, "outfile", "scans.csv", "Destination of scan results (defaults to scans.csv)")
 }
 
@@ -38,6 +38,9 @@ func main() {
 
 	// pipeline
 	scanChan := store(dest, filter(scan(gen(portsToScan...))))
+
+	// unfiltered
+	// scanChan := store(dest, scan(gen(portsToScan...)))
 
 	// broken up for explainability
 	// var scanChan <-chan scanOp

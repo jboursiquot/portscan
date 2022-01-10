@@ -25,7 +25,7 @@ var timeout int
 
 func init() {
 	flag.StringVar(&host, "host", "127.0.0.1", "Host to scan.")
-	flag.StringVar(&ports, "ports", "80", "Port(s) (e.g. 80, 22-100).")
+	flag.StringVar(&ports, "ports", "5000-5500", "Port(s) (e.g. 80, 22-100).")
 	flag.IntVar(&timeout, "timeout", 5, "Timeout in seconds (default is 5).")
 
 	rand.Seed(time.Now().UnixNano())
@@ -57,22 +57,24 @@ func main() {
 	ctx := context.Background()
 
 	for _, port := range portsToScan {
-		ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
-		defer cancel()
+		func() {
+			ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+			defer cancel()
 
-		if err := sem.Acquire(ctx, semAcquisitionWeight); err != nil {
-			fmt.Printf("Failed to acquire semaphore (port %d): %v\n", port, err)
-			continue
-		}
-
-		go func(port int) {
-			defer sem.Release(semAcquisitionWeight)
-			sleepy(10)
-			p := scan(host, port)
-			if p != 0 {
-				openPorts = append(openPorts, p)
+			if err := sem.Acquire(ctx, semAcquisitionWeight); err != nil {
+				fmt.Printf("Failed to acquire semaphore (port %d): %v\n", port, err)
+				return
 			}
-		}(port)
+
+			go func(port int) {
+				defer sem.Release(semAcquisitionWeight)
+				sleepy(10)
+				p := scan(host, port)
+				if p != 0 {
+					openPorts = append(openPorts, p)
+				}
+			}(port)
+		}()
 	}
 
 	// We block here until done.

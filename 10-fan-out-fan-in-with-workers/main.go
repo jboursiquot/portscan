@@ -17,7 +17,7 @@ var ports string
 var workers int
 
 func init() {
-	flag.StringVar(&ports, "ports", "80", "Port(s) (e.g. 80, 22-100).")
+	flag.StringVar(&ports, "ports", "5400-5500", "Port(s) (e.g. 80, 22-100).")
 	flag.IntVar(&workers, "workers", runtime.NumCPU(), "Number of workers (defaults to # of logical CPUs).")
 }
 
@@ -44,15 +44,15 @@ func main() {
 		chans = append(chans, scan(done, in))
 	}
 
-	for s := range filterOpen(done, merge(done, chans...)) {
-		fmt.Printf("%#v\n", s)
-	}
-
-	// for s := range filterErr(done, merge(done, chans...)) {
+	// for s := range filterOpen(done, merge(done, chans...)) {
 	// 	fmt.Printf("%#v\n", s)
-	// 	done <- struct{}{}
-	// 	return
 	// }
+
+	for s := range filterErr(done, merge(done, chans...)) {
+		fmt.Printf("%#v\n", s)
+		done <- struct{}{}
+		return
+	}
 
 	// done chan is closed by the deferred call here
 }
